@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
+    <PreferenceCategory android:title="@string/settings_streaming_quality">
+        <ListPreference
+            android:key="streaming_quality"
+            android:title="@string/settings_streaming_quality"
+            android:entries="@array/quality_labels"
+            android:entryValues="@array/quality_values"
+            android:defaultValue="NORMAL" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="@string/settings_download_quality">
+        <ListPreference
+            android:key="download_quality"
+            android:title="@string/settings_download_quality"
+            android:entries="@array/quality_labels"
+            android:entryValues="@array/quality_values"
+            android:defaultValue="HIGH" />
+        <SwitchPreferenceCompat
+            android:key="download_wifi_only"
+            android:title="@string/settings_wifi_only"
+            android:defaultValue="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="Storage">
+        <Preference
+            android:key="storage_location"
+            android:title="@string/settings_storage" />
+        <SeekBarPreference
+            android:key="max_storage_gb"
+            android:title="@string/settings_max_storage"
+            android:min="1"
+            android:max="50"
+            android:defaultValue="5"
+            app:showSeekBarValue="true"
+            xmlns:app="http://schemas.android.com/apk/res-auto" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="Playback">
+        <SwitchPreferenceCompat
+            android:key="offline_mode"
+            android:title="@string/settings_offline"
+            android:defaultValue="false" />
+        <SwitchPreferenceCompat
+            android:key="normalize_volume"
+            android:title="@string/settings_normalize"
+            android:defaultValue="true" />
+    </PreferenceCategory>
+
+    <PreferenceCategory android:title="@string/settings_about">
+        <Preference
+            android:title="@string/settings_about"
+            android:summary="Spoldify v1.0" />
+    </PreferenceCategory>
+</PreferenceScreen>

@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="utf-8"?>
+<navigation xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/nav_graph"
+    app:startDestination="@id/loginFragment">
+
+    <fragment
+        android:id="@+id/loginFragment"
+        android:name="com.iliverez.spoldify.ui.login.LoginFragment"
+        android:label="@string/app_name">
+        <action
+            android:id="@+id/action_login_to_home"
+            app:destination="@id/homeFragment"
+            app:popUpTo="@id/loginFragment"
+            app:popUpToInclusive="true" />
+        <action
+            android:id="@+id/action_login_to_auth_web"
+            app:destination="@id/authWebFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/authWebFragment"
+        android:name="com.iliverez.spoldify.ui.login.AuthWebFragment"
+        android:label="@string/app_name">
+        <action
+            android:id="@+id/action_auth_web_to_home"
+            app:destination="@id/homeFragment"
+            app:popUpTo="@id/loginFragment"
+            app:popUpToInclusive="true" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/homeFragment"
+        android:name="com.iliverez.spoldify.ui.home.HomeFragment"
+        android:label="@string/nav_home">
+        <action
+            android:id="@+id/action_home_to_album"
+            app:destination="@id/albumDetailFragment" />
+        <action
+            android:id="@+id/action_home_to_artist"
+            app:destination="@id/artistDetailFragment" />
+        <action
+            android:id="@+id/action_home_to_playlist"
+            app:destination="@id/playlistDetailFragment" />
+        <action
+            android:id="@+id/action_home_to_now_playing"
+            app:destination="@id/nowPlayingFragment" />
+        <action
+            android:id="@+id/action_home_to_auth_web"
+            app:destination="@id/authWebFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/searchFragment"
+        android:name="com.iliverez.spoldify.ui.search.SearchFragment"
+        android:label="@string/nav_search">
+        <action
+            android:id="@+id/action_search_to_album"
+            app:destination="@id/albumDetailFragment" />
+        <action
+            android:id="@+id/action_search_to_artist"
+            app:destination="@id/artistDetailFragment" />
+        <action
+            android:id="@+id/action_search_to_playlist"
+            app:destination="@id/playlistDetailFragment" />
+        <action
+            android:id="@+id/action_search_to_now_playing"
+            app:destination="@id/nowPlayingFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/libraryFragment"
+        android:name="com.iliverez.spoldify.ui.library.LibraryFragment"
+        android:label="@string/nav_library">
+        <action
+            android:id="@+id/action_library_to_album"
+            app:destination="@id/albumDetailFragment" />
+        <action
+            android:id="@+id/action_library_to_artist"
+            app:destination="@id/artistDetailFragment" />
+        <action
+            android:id="@+id/action_library_to_playlist"
+            app:destination="@id/playlistDetailFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/nowPlayingFragment"
+        android:name="com.iliverez.spoldify.ui.nowplaying.NowPlayingFragment"
+        android:label="@string/app_name" />
+
+    <fragment
+        android:id="@+id/albumDetailFragment"
+        android:name="com.iliverez.spoldify.ui.album.AlbumDetailFragment"
+        android:label="@string/app_name">
+        <argument
+            android:name="albumId"
+            app:argType="string" />
+        <action
+            android:id="@+id/action_album_to_artist"
+            app:destination="@id/artistDetailFragment" />
+        <action
+            android:id="@+id/action_album_to_now_playing"
+            app:destination="@id/nowPlayingFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/artistDetailFragment"
+        android:name="com.iliverez.spoldify.ui.artist.ArtistDetailFragment"
+        android:label="@string/app_name">
+        <argument
+            android:name="artistId"
+            app:argType="string" />
+        <action
+            android:id="@+id/action_artist_to_album"
+            app:destination="@id/albumDetailFragment" />
+        <action
+            android:id="@+id/action_artist_to_now_playing"
+            app:destination="@id/nowPlayingFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/playlistDetailFragment"
+        android:name="com.iliverez.spoldify.ui.playlist.PlaylistDetailFragment"
+        android:label="@string/app_name">
+        <argument
+            android:name="playlistId"
+            app:argType="string" />
+        <action
+            android:id="@+id/action_playlist_to_now_playing"
+            app:destination="@id/nowPlayingFragment" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/settingsFragment"
+        android:name="com.iliverez.spoldify.ui.settings.SettingsFragment"
+        android:label="@string/nav_settings" />
+
+</navigation>

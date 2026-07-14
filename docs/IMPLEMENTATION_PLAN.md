@@ -1,4 +1,4 @@
-# Spoldfify - Implementation Plan
+# Spoldify - Implementation Plan
 
 ## Project Overview
 
@@ -49,8 +49,8 @@ exclude group: 'org.apache.logging.log4j'
 
 ### 1.5 Base architecture scaffolding:
 ```
-com.iliverez.spoldfify/
-├── SpoldfifyApp.kt                    (Application class)
+com.iliverez.spoldify/
+├── SpoldifyApp.kt                    (Application class)
 ├── MainActivity.kt                    (single Activity, hosts NavHostFragment)
 ├── data/
 │   ├── repository/

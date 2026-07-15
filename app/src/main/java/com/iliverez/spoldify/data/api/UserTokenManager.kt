@@ -27,14 +27,20 @@ class UserTokenManager private constructor(private val context: Context) {
         private set
     private var refreshToken: String? = null
     private var tokenExpiry: Long = 0
+    @Volatile
+    private var isSessionToken: Boolean = false
 
     val hasToken: Boolean
         get() = prefs.contains(KEY_REFRESH_TOKEN) || prefs.contains(KEY_ACCESS_TOKEN)
+
+    val hasOAuthRefreshToken: Boolean
+        get() = prefs.contains(KEY_REFRESH_TOKEN)
 
     fun saveTokens(accessToken: String, refreshToken: String?, expiresIn: Long) {
         this.accessToken = accessToken
         this.refreshToken = refreshToken
         this.tokenExpiry = System.currentTimeMillis() + (expiresIn * 1000L) - 60_000L
+        this.isSessionToken = false
 
         prefs.edit().apply {
             putString(KEY_ACCESS_TOKEN, accessToken)
@@ -42,9 +48,10 @@ class UserTokenManager private constructor(private val context: Context) {
                 putString(KEY_REFRESH_TOKEN, refreshToken)
             }
             putLong(KEY_EXPIRY, tokenExpiry)
+            putBoolean(KEY_IS_SESSION_TOKEN, false)
             apply()
         }
-        Log.d(TAG, "Saved tokens, expires in ${expiresIn}s")
+        Log.d(TAG, "Saved OAuth tokens, expires in ${expiresIn}s")
     }
 
     private var sessionRebootstrap: (() -> String?)? = null
@@ -54,22 +61,37 @@ class UserTokenManager private constructor(private val context: Context) {
     }
 
     fun getValidToken(): String? {
+        if (isSessionToken) {
+            val rt = refreshToken ?: loadRefreshTokenFromPrefs()
+            if (rt != null) {
+                val refreshed = refreshWithToken(rt)
+                if (refreshed != null) {
+                    Log.d(TAG, "Token source: OAuth refresh (upgraded from session token)")
+                    return refreshed
+                }
+            }
+        }
+
         if (accessToken != null && System.currentTimeMillis() < tokenExpiry) {
+            Log.d(TAG, "Token source: cached ${if (isSessionToken) "session" else "OAuth"}")
             return accessToken
         }
 
         loadFromPrefs()
         if (accessToken != null && System.currentTimeMillis() < tokenExpiry) {
+            Log.d(TAG, "Token source: persisted ${if (isSessionToken) "session" else "OAuth"}")
             return accessToken
         }
 
         val rt = refreshToken ?: loadRefreshTokenFromPrefs()
         if (rt != null) {
+            Log.d(TAG, "Token source: OAuth refresh (app client ID ${BuildConfig.SPOTIFY_CLIENT_ID.take(8)}...)")
             return refreshWithToken(rt)
         }
 
         val newToken = sessionRebootstrap?.invoke()
         if (newToken != null) {
+            Log.w(TAG, "Token source: librespot session bootstrap (NOT app client ID)")
             bootstrapFromSession(newToken)
             return newToken
         }
@@ -79,7 +101,29 @@ class UserTokenManager private constructor(private val context: Context) {
     }
 
     fun bootstrapFromSession(sessionAccessToken: String) {
-        saveTokens(sessionAccessToken, null, 3600L)
+        val existingRt = refreshToken ?: prefs.getString(KEY_REFRESH_TOKEN, null)
+        if (existingRt != null) {
+            val refreshed = refreshWithToken(existingRt)
+            if (refreshed != null) {
+                Log.d(TAG, "Used OAuth refresh instead of session bootstrap")
+                return
+            }
+        }
+
+        this.accessToken = sessionAccessToken
+        this.refreshToken = existingRt
+        this.tokenExpiry = System.currentTimeMillis() + 3_540_000L
+        this.isSessionToken = true
+
+        prefs.edit().apply {
+            putString(KEY_ACCESS_TOKEN, sessionAccessToken)
+            if (existingRt != null) {
+                putString(KEY_REFRESH_TOKEN, existingRt)
+            }
+            putLong(KEY_EXPIRY, tokenExpiry)
+            putBoolean(KEY_IS_SESSION_TOKEN, true)
+            apply()
+        }
         Log.d(TAG, "Bootstrapped token from session")
     }
 
@@ -121,6 +165,7 @@ class UserTokenManager private constructor(private val context: Context) {
         accessToken = prefs.getString(KEY_ACCESS_TOKEN, null)
         refreshToken = prefs.getString(KEY_REFRESH_TOKEN, null)
         tokenExpiry = prefs.getLong(KEY_EXPIRY, 0)
+        isSessionToken = prefs.getBoolean(KEY_IS_SESSION_TOKEN, false)
     }
 
     private fun loadRefreshTokenFromPrefs(): String? {
@@ -133,6 +178,7 @@ class UserTokenManager private constructor(private val context: Context) {
         accessToken = null
         refreshToken = null
         tokenExpiry = 0
+        isSessionToken = false
         prefs.edit().clear().apply()
         Log.d(TAG, "Tokens cleared")
     }
@@ -141,6 +187,7 @@ class UserTokenManager private constructor(private val context: Context) {
         private const val KEY_ACCESS_TOKEN = "access_token"
         private const val KEY_REFRESH_TOKEN = "refresh_token"
         private const val KEY_EXPIRY = "token_expiry"
+        private const val KEY_IS_SESSION_TOKEN = "is_session_token"
         @Volatile
         private var instance: UserTokenManager? = null
 

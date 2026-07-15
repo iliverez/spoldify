@@ -1,7 +1,10 @@
 package com.iliverez.spoldify.player
 
 import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -31,6 +34,31 @@ class SpotifyPlayerWrapper {
     private val handler = Handler(Looper.getMainLooper())
     private var positionUpdateRunnable: Runnable? = null
     private var hasAudioFocus = false
+    @Volatile
+    private var pausedByFocusLoss = false
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        when (focusChange) {
+            AudioManager.AUDIOFOCUS_LOSS -> {
+                hasAudioFocus = false
+                pausedByFocusLoss = false
+                pause()
+            }
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                if (_playbackInfo.value?.state == PlaybackState.PLAYING) {
+                    pausedByFocusLoss = true
+                    pause()
+                }
+            }
+            AudioManager.AUDIOFOCUS_GAIN -> {
+                if (pausedByFocusLoss) {
+                    pausedByFocusLoss = false
+                    resume()
+                }
+            }
+        }
+    }
 
     private val prefetchWorker = TrackPrefetchWorker()
     private val webApi = SpotifyApi.fromApp()
@@ -100,11 +128,14 @@ class SpotifyPlayerWrapper {
                     }
                     override fun onPlaybackEnded(p: Player) {
                         Log.i(TAG, "Playback ended, will auto-play next")
-                        handler.post { stopPositionUpdates() }
+                        handler.post {
+                            stopPositionUpdates()
+                            _playbackInfo.value = _playbackInfo.value?.copy(state = PlaybackState.BUFFERING)
+                        }
                         val check = Runnable {
                             val state = _playbackInfo.value?.state
-                            if (state != PlaybackState.PLAYING && state != PlaybackState.LOADING && state != PlaybackState.BUFFERING) {
-                                Log.i(TAG, "Auto-playing next track")
+                            if (state != PlaybackState.PLAYING && state != PlaybackState.LOADING) {
+                                Log.i(TAG, "No new track started after ${END_CHECK_DELAY_MS}ms, force skipping")
                                 skipNext()
                             }
                         }
@@ -185,7 +216,10 @@ class SpotifyPlayerWrapper {
                         val seek = pendingSeekMs
                         if (seek != null) {
                             pendingSeekMs = null
-                            Thread { p.seek(seek.toInt()) }.start()
+                            Thread {
+                                try { p.seek(seek.toInt()) }
+                                catch (e: Exception) { Log.e(TAG, "Pending seek failed", e) }
+                            }.start()
                         }
                         handler.post {
                             _playbackInfo.value = _playbackInfo.value?.copy(state = PlaybackState.PLAYING)
@@ -246,16 +280,30 @@ class SpotifyPlayerWrapper {
     }
 
     fun play(uri: String) {
+        val p = player ?: run {
+            Log.w(TAG, "play() called but player is not ready")
+            return
+        }
         contextTracks = emptyList()
         currentTrackIndex = -1
         prefetchWorker.cancel()
-        val p = player ?: return
         requestAudioFocus()
-        Thread { p.load(uri, true, false) }.start()
         _playbackInfo.postValue(_playbackInfo.value?.copy(state = PlaybackState.LOADING))
+        Thread {
+            try {
+                p.load(uri, true, false)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load track: $uri", e)
+                _playbackInfo.postValue(_playbackInfo.value?.copy(state = PlaybackState.ERROR))
+            }
+        }.start()
     }
 
     fun playWithContext(firstTrackUri: String, queueUris: List<String>) {
+        val p = player ?: run {
+            Log.w(TAG, "playWithContext() called but player is not ready")
+            return
+        }
         val allUris = listOf(firstTrackUri) + queueUris
         contextTracks = allUris
         currentTrackIndex = 0
@@ -263,26 +311,33 @@ class SpotifyPlayerWrapper {
         val shuffle = _playbackInfo.value?.shuffleEnabled ?: false
         val orderedQueue = if (shuffle) queueUris.shuffled() else queueUris
 
-        val p = player ?: return
         requestAudioFocus()
-        Thread {
-            p.load(firstTrackUri, true, false)
-            for (uri in orderedQueue) {
-                try {
-                    p.addToQueue(uri)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to add to queue: $uri", e)
-                }
-            }
-            triggerPrefetch()
-        }.start()
         _playbackInfo.postValue(_playbackInfo.value?.copy(state = PlaybackState.LOADING))
+        Thread {
+            try {
+                p.load(firstTrackUri, true, false)
+                for (uri in orderedQueue) {
+                    try {
+                        p.addToQueue(uri)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to add to queue: $uri", e)
+                    }
+                }
+                triggerPrefetch()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to load context track: $firstTrackUri", e)
+                _playbackInfo.postValue(_playbackInfo.value?.copy(state = PlaybackState.ERROR))
+            }
+        }.start()
     }
 
     fun resume() {
         val p = player ?: return
         requestAudioFocus()
-        Thread { p.play() }.start()
+        Thread {
+            try { p.play() }
+            catch (e: Exception) { Log.e(TAG, "Failed to resume", e) }
+        }.start()
     }
 
     fun pause() {
@@ -299,14 +354,24 @@ class SpotifyPlayerWrapper {
         panicRetryCount = 0
         requestAudioFocus()
         _playbackInfo.value = info.copy(state = PlaybackState.LOADING)
-        Thread { p.load(uri, true, false) }.start()
+        Thread {
+            try {
+                p.load(uri, true, false)
+            } catch (e: Exception) {
+                Log.e(TAG, "Retry after error failed: $uri", e)
+                _playbackInfo.postValue(_playbackInfo.value?.copy(state = PlaybackState.ERROR))
+            }
+        }.start()
     }
 
     fun skipNext() {
+        val p = player ?: run {
+            Log.w(TAG, "skipNext() called but player is not ready")
+            return
+        }
         val nextIndex = currentTrackIndex + 1
         if (contextTracks.isNotEmpty() && currentTrackIndex >= 0 && nextIndex < contextTracks.size) {
             val nextUri = contextTracks[nextIndex]
-            val p = player ?: return
             requestAudioFocus()
             stopPositionUpdates()
             _playbackInfo.value = _playbackInfo.value?.copy(state = PlaybackState.LOADING)
@@ -320,6 +385,7 @@ class SpotifyPlayerWrapper {
                     triggerPrefetch()
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to skip next", e)
+                    _playbackInfo.postValue(_playbackInfo.value?.copy(state = PlaybackState.ERROR))
                 }
             }.start()
         } else {
@@ -332,6 +398,10 @@ class SpotifyPlayerWrapper {
             Log.w(TAG, "Already fetching a recommendation, skipping")
             return
         }
+        val p = player ?: run {
+            Log.w(TAG, "playRandomRecommendation() called but player is not ready")
+            return
+        }
         val currentInfo = _playbackInfo.value
         val seedArtist = currentInfo?.currentTrack?.artistId?.ifBlank { null }
             ?: lastSeedArtistId.ifBlank { null }
@@ -342,6 +412,7 @@ class SpotifyPlayerWrapper {
 
         if (seedArtist == null && seedTrack == null && artistName == null) {
             Log.w(TAG, "No seed info available for recommendations")
+            _playbackInfo.value = _playbackInfo.value?.copy(state = PlaybackState.ERROR)
             return
         }
 
@@ -368,25 +439,14 @@ class SpotifyPlayerWrapper {
                 if (chosenId != null) {
                     contextTracks = emptyList()
                     currentTrackIndex = -1
-                    val p = player
-                    if (p != null) {
-                        p.load("spotify:track:$chosenId", true, false)
-                    } else {
-                        handler.post {
-                            _playbackInfo.value = _playbackInfo.value?.copy(state = PlaybackState.IDLE)
-                        }
-                    }
+                    p.load("spotify:track:$chosenId", true, false)
                 } else {
                     Log.w(TAG, "All recommendation attempts failed")
-                    handler.post {
-                        _playbackInfo.value = _playbackInfo.value?.copy(state = PlaybackState.IDLE)
-                    }
+                    _playbackInfo.postValue(_playbackInfo.value?.copy(state = PlaybackState.ERROR))
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to fetch recommendation", e)
-                handler.post {
-                    _playbackInfo.value = _playbackInfo.value?.copy(state = PlaybackState.IDLE)
-                }
+                _playbackInfo.postValue(_playbackInfo.value?.copy(state = PlaybackState.ERROR))
             } finally {
                 isFetchingRecommendation = false
             }
@@ -465,6 +525,7 @@ class SpotifyPlayerWrapper {
                     triggerPrefetch()
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to load previous track", e)
+                    _playbackInfo.postValue(_playbackInfo.value?.copy(state = PlaybackState.ERROR))
                 }
             }.start()
         } else {
@@ -485,9 +546,12 @@ class SpotifyPlayerWrapper {
 
     fun setShuffle(enabled: Boolean) {
         val info = _playbackInfo.value ?: return
-        _playbackInfo.postValue(info.copy(shuffleEnabled = enabled))
+        val p = player ?: return
 
-        if (contextTracks.isEmpty() || currentTrackIndex < 0) return
+        if (contextTracks.isEmpty() || currentTrackIndex < 0) {
+            _playbackInfo.postValue(info.copy(shuffleEnabled = enabled))
+            return
+        }
 
         val currentUri = contextTracks[currentTrackIndex]
         val currentPosition = info.positionMs
@@ -497,21 +561,25 @@ class SpotifyPlayerWrapper {
 
         prefetchWorker.cancel()
 
-        val p = player ?: return
         pendingSeekMs = currentPosition
         requestAudioFocus()
-        Thread {
-            p.load(currentUri, true, false)
-            for (uri in orderedQueue) {
-                try {
-                    p.addToQueue(uri)
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to add to queue: $uri", e)
-                }
-            }
-            triggerPrefetch()
-        }.start()
         _playbackInfo.postValue(info.copy(state = PlaybackState.LOADING, shuffleEnabled = enabled))
+        Thread {
+            try {
+                p.load(currentUri, true, false)
+                for (uri in orderedQueue) {
+                    try {
+                        p.addToQueue(uri)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to add to queue: $uri", e)
+                    }
+                }
+                triggerPrefetch()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to apply shuffle", e)
+                _playbackInfo.postValue(_playbackInfo.value?.copy(state = PlaybackState.ERROR))
+            }
+        }.start()
     }
 
     private fun setupNetworkObserver() {
@@ -574,12 +642,25 @@ class SpotifyPlayerWrapper {
         if (hasAudioFocus) return
         try {
             val am = SpoldifyApp.instance.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val result = am.requestAudioFocus(
-                null,
-                AudioManager.STREAM_MUSIC,
-                AudioManager.AUDIOFOCUS_GAIN
-            )
-            hasAudioFocus = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val attrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+                val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(attrs)
+                    .setOnAudioFocusChangeListener(audioFocusListener)
+                    .build()
+                audioFocusRequest = request
+                hasAudioFocus = am.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            } else {
+                @Suppress("DEPRECATION")
+                hasAudioFocus = am.requestAudioFocus(
+                    audioFocusListener,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN
+                ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+            }
             Log.d(TAG, "Audio focus request: $hasAudioFocus")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to request audio focus", e)
@@ -590,8 +671,15 @@ class SpotifyPlayerWrapper {
         if (!hasAudioFocus) return
         try {
             val am = SpoldifyApp.instance.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            am.abandonAudioFocus(null)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+                audioFocusRequest = null
+            } else {
+                @Suppress("DEPRECATION")
+                am.abandonAudioFocus(audioFocusListener)
+            }
             hasAudioFocus = false
+            pausedByFocusLoss = false
             Log.d(TAG, "Audio focus abandoned")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to abandon audio focus", e)
@@ -602,11 +690,11 @@ class SpotifyPlayerWrapper {
         stopPositionUpdates()
         positionUpdateRunnable = object : Runnable {
             override fun run() {
-                val current = _playbackInfo.value ?: return
-                if (current.state == PlaybackState.PLAYING && current.positionMs < current.durationMs) {
+                val current = _playbackInfo.value
+                if (current != null && current.state == PlaybackState.PLAYING && current.positionMs < current.durationMs) {
                     _playbackInfo.value = current.copy(positionMs = current.positionMs + 1000)
+                    positionUpdateRunnable?.let { handler.postDelayed(it, 1000) }
                 }
-                positionUpdateRunnable?.let { handler.postDelayed(it, 1000) }
             }
         }
         handler.postDelayed(positionUpdateRunnable!!, 1000)

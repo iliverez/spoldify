@@ -7,8 +7,10 @@ import androidx.lifecycle.MutableLiveData
 import com.iliverez.spoldify.BuildConfig
 import com.iliverez.spoldify.data.api.SpotifyOAuth
 import com.iliverez.spoldify.data.auth.TokenExchangeServer
+import com.google.gson.JsonParser
 import xyz.gianlu.librespot.core.OAuth
 import xyz.gianlu.librespot.core.Session
+import xyz.gianlu.librespot.mercury.RawMercuryRequest
 import java.io.File
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
@@ -234,22 +236,23 @@ class AuthRepository private constructor(private val context: Context) {
         _authState.postValue(AuthState.LoggedIn(newSession))
     }
 
+    private val WEB_API_SCOPES = arrayOf(
+        "user-top-read", "user-read-recently-played",
+        "playlist-read-private", "playlist-read",
+        "user-library-read", "user-follow-read"
+    )
+
     private fun bootstrapSessionToken() {
         try {
             val s = session ?: return
-            val token = s.tokens().getToken(
-                "user-top-read", "user-read-recently-played",
-                "playlist-read-private", "playlist-read",
-                "user-library-read", "user-follow-read"
-            ).accessToken
-            tokenManager.bootstrapFromSession(token)
+            val token = requestAppClientIdToken(s) ?: requestSessionToken(s)
+            if (token != null) {
+                tokenManager.bootstrapFromSession(token)
+            }
             tokenManager.setSessionRebootstrap {
                 try {
-                    session?.tokens()?.getToken(
-                        "user-top-read", "user-read-recently-played",
-                        "playlist-read-private", "playlist-read",
-                        "user-library-read", "user-follow-read"
-                    )?.accessToken
+                    requestAppClientIdToken(session ?: return@setSessionRebootstrap null)
+                        ?: requestSessionToken(session ?: return@setSessionRebootstrap null)
                 } catch (e: Exception) {
                     Log.w(TAG, "Re-bootstrap failed: ${e.message}")
                     null
@@ -258,6 +261,43 @@ class AuthRepository private constructor(private val context: Context) {
             Log.d(TAG, "Bootstrapped token from session for user: ${s.username()}")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to bootstrap session token: ${e.message}")
+        }
+    }
+
+    private fun requestSessionToken(s: Session): String? {
+        return try {
+            val token = s.tokens().getToken(*WEB_API_SCOPES).accessToken
+            Log.d(TAG, "Got token via session.tokens() (librespot client ID)")
+            token
+        } catch (e: Exception) {
+            Log.w(TAG, "Session token request failed: ${e.message}")
+            null
+        }
+    }
+
+    private fun requestAppClientIdToken(s: Session): String? {
+        val scope = WEB_API_SCOPES.joinToString(",")
+        val deviceId = s.deviceId()
+        val url = "hm://keymaster/token/authenticated?scope=$scope&client_id=${BuildConfig.SPOTIFY_CLIENT_ID}&device_id=$deviceId"
+
+        return try {
+            val request = RawMercuryRequest.newBuilder()
+                .setUri(url)
+                .build()
+
+            val response = s.mercury().sendSync(request)
+            val sb = StringBuilder()
+            val iter = response.payload.iterator()
+            while (iter.hasNext()) {
+                sb.append(String(iter.next(), Charsets.UTF_8))
+            }
+            val json = JsonParser.parseString(sb.toString()).asJsonObject
+            val accessToken = json.getAsJsonPrimitive("access_token").asString
+            Log.d(TAG, "Got keymaster token with app client ID (${BuildConfig.SPOTIFY_CLIENT_ID.take(8)}...)")
+            accessToken
+        } catch (e: Exception) {
+            Log.w(TAG, "App client ID keymaster request failed: ${e.message}")
+            null
         }
     }
 

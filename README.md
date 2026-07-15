@@ -88,6 +88,58 @@ authorizing, you are redirected back to the app via the
 On head units without a browser, there is also an in-app **AuthWeb** screen
 that loads the OAuth page in a WebView.
 
+#### QR code token upgrade (recommended after first login)
+
+After logging in via username/password or Spotify Connect, the app uses a
+librespot session token for Web API calls (home, search, playlists). This
+token is tied to librespot's shared client ID and is subject to aggressive
+rate limiting (HTTP 429). Completing the OAuth flow below upgrades the Web
+API token to your own client ID, giving the app its own rate-limit budget.
+
+**You only need to do this once.** A refresh token is stored permanently and
+used to obtain fresh access tokens on every subsequent app start. The session
+login (for playback) is unaffected.
+
+**Prerequisites:**
+- The head unit and your phone must be on the same Wi-Fi network.
+- Complete this from the **Home** screen (not the login screen).
+
+**Steps:**
+
+1. On the Spoldify home screen, tap **Sign in with Spotify**.
+2. A QR code appears on the head unit screen, along with a text field for
+   manual code entry.
+3. Scan the QR code with your phone (camera app or any QR scanner). This
+   opens Spotify's authorization page in your phone's browser.
+4. Log in to Spotify if prompted, review the requested permissions, and tap
+   **Agree**.
+5. Spotify redirects back through the head unit's local server. The app
+   exchanges the authorization code for access and refresh tokens.
+6. The home screen reloads automatically. The status text changes to
+   **Connected** and the QR code disappears.
+
+**Alternative if no QR scanner is available:**
+- If the head unit has a browser, the OAuth URL opens automatically.
+- If neither works, copy the full callback URL
+  (`spoldify://auth/callback?code=...`) from the browser's address bar after
+  authorization and paste it into the text field on the head unit, then tap
+  **Submit**.
+
+**What happens behind the scenes:**
+
+1. The app starts a local HTTP server (`TokenExchangeServer`) and generates
+   an OAuth authorization URL containing your client ID and PKCE challenge.
+2. The QR code encodes the local server URL so your phone's browser can reach
+   it over Wi-Fi.
+3. After you authorize on Spotify, the callback delivers an authorization
+   code to the local server.
+4. The app exchanges the code at `accounts.spotify.com/api/token` for an
+   access token and a refresh token, both tied to your client ID.
+5. The `UserTokenManager` stores the refresh token and marks the token as
+   OAuth-sourced. On every subsequent start, it refreshes the access token
+   using your client ID instead of falling back to the rate-limited
+   librespot session token.
+
 ### Spotify Connect (Zeroconf)
 
 This is the recommended method for car head units. Instead of entering

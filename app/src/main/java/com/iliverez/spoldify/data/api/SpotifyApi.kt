@@ -90,7 +90,7 @@ class SpotifyApi(private val tokenManager: UserTokenManager) {
     }
 
     fun getPlaylistTracks(playlistId: String, offset: Int, limit: Int = 100): JsonObject {
-        val url = "https://api.spotify.com/v1/playlists/$playlistId/tracks?offset=$offset&limit=$limit"
+        val url = "https://api.spotify.com/v1/playlists/$playlistId/items?offset=$offset&limit=$limit"
         return request(url)
     }
 
@@ -133,7 +133,7 @@ class SpotifyApi(private val tokenManager: UserTokenManager) {
         if (now < rateLimitedUntil) {
             val waitSec = (rateLimitedUntil - now) / 1000
             Log.w(TAG, "Rate limited, skipping ${url.take(60)} (${waitSec}s remaining)")
-            throw RuntimeException("Rate limited, retry after ${waitSec}s")
+            throw RuntimeException("API rate limited, retry after ${waitSec}s")
         }
 
         throttle()

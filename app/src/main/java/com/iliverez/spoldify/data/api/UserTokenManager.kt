@@ -3,6 +3,8 @@ package com.iliverez.spoldify.data.api
 import android.content.Context
 import android.content.SharedPreferences
 import android.util.Log
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import com.iliverez.spoldify.BuildConfig
 import com.google.gson.JsonParser
 import okhttp3.FormBody
@@ -13,7 +15,16 @@ import java.util.concurrent.TimeUnit
 class UserTokenManager private constructor(private val context: Context) {
 
     private val prefs: SharedPreferences by lazy {
-        context.getSharedPreferences("spoldify_user_tokens", Context.MODE_PRIVATE)
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        EncryptedSharedPreferences.create(
+            context,
+            "spoldify_user_tokens",
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
     }
 
     private val httpClient = OkHttpClient.Builder()
@@ -144,6 +155,11 @@ class UserTokenManager private constructor(private val context: Context) {
                 val responseBody = response.body?.string()
                 if (!response.isSuccessful || responseBody == null) {
                     Log.e(TAG, "Token refresh failed: ${response.code} - ${responseBody?.take(200)}")
+                    if (response.code == 400) {
+                        Log.w(TAG, "Refresh token invalidated, clearing from storage")
+                        prefs.edit().remove(KEY_REFRESH_TOKEN).apply()
+                        this.refreshToken = null
+                    }
                     return null
                 }
                 val json = JsonParser.parseString(responseBody).asJsonObject

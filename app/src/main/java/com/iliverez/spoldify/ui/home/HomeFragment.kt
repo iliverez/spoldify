@@ -48,7 +48,18 @@ class HomeFragment : Fragment() {
         setupRecyclerViews()
         setupListeners()
         observeViewModel()
+        promptOAuthIfNeeded()
         Log.i(TAG, "Spoldify build v2026.06.02 - HomeFragment created")
+    }
+
+    private fun promptOAuthIfNeeded() {
+        val tokenManager = com.iliverez.spoldify.data.api.UserTokenManager.getInstance(requireContext())
+        if (!tokenManager.hasOAuthRefreshToken) {
+            Log.i(TAG, "No OAuth refresh token, showing sign-in prompt")
+            binding.errorLayout.visibility = View.VISIBLE
+            binding.progressBar.visibility = View.GONE
+            binding.tvError.text = getString(R.string.home_error_rate_limited)
+        }
     }
 
     private fun setupRecyclerViews() {
@@ -134,8 +145,7 @@ class HomeFragment : Fragment() {
             binding.tilAuthCode.visibility = View.VISIBLE
             binding.btnSubmitCode.visibility = View.VISIBLE
 
-            Log.i(TAG, "Setup URL: ${result.setupUrl}")
-            Log.i(TAG, "OAuth URL: ${result.oauthUrl}")
+            Log.i(TAG, "Token exchange started on local server")
 
             try {
                 startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(result.oauthUrl)))
@@ -180,8 +190,10 @@ class HomeFragment : Fragment() {
 
     private fun observeViewModel() {
         viewModel.isLoading.observe(viewLifecycleOwner) { isLoading ->
-            binding.progressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
-            if (isLoading) {
+            val tokenManager = com.iliverez.spoldify.data.api.UserTokenManager.getInstance(requireContext())
+            val showOAuthPrompt = !tokenManager.hasOAuthRefreshToken
+            binding.progressBar.visibility = if (isLoading && !showOAuthPrompt) View.VISIBLE else View.GONE
+            if (isLoading && !showOAuthPrompt) {
                 binding.errorLayout.visibility = View.GONE
             }
         }

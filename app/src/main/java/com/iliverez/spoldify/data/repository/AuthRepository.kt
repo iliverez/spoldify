@@ -238,7 +238,7 @@ class AuthRepository private constructor(private val context: Context) {
 
     private val WEB_API_SCOPES = arrayOf(
         "user-top-read", "user-read-recently-played",
-        "playlist-read-private", "playlist-read",
+        "playlist-read-private",
         "user-library-read", "user-follow-read"
     )
 
